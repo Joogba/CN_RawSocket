@@ -33,14 +33,14 @@ void ProcessPacket(unsigned char *buffer, int size, char *pip_so)
         case 6: // TCP 프로토콜
             if(!myflag){
             LogTcpPacket(buffer, size, pip_so);
-            printf("TCP 기록 중..\t");
+            printf("TCP 기록 중..\t\n");
             }
             printf("패킷 통과 중..");
             break;
         case 17: // UDP 프로토콜
             if(myflag){
                 LogUdpPacket(buffer, size, pip_so);
-                printf("UDP 기록 중..\t");
+                printf("UDP 기록 중..\t\n");
             }
             printf("패킷 통과 중..");
             break;
@@ -160,11 +160,11 @@ void LogData(unsigned char *buffer, int size)
 {
     int i, j;
     for (i = 0; i < size; i++) {  //패킷은 16비트씩 구성되있다.
-        if (i != 0 && i % 16 == 0) { // 한줄씩 찍는데 i가 16비트 배수로 떨어지면 문자니까
+        if (i != 0 && i % 16 == 0) { // 한줄씩 찍는데 i가 16비트 배수로 떨어지면 문자
 
             for (j = i - 16; j < i; j++) {
                 if (buffer[j] >= 32 && buffer[j] <= 128) {
-                    fprintf(logfile, " %c", (unsigned char) buffer[j]); // 사람 문자로 변환.
+                    fprintf(logfile, " %c", (unsigned char) buffer[j]); // 문자로 변환.
                 } else {
                     fprintf(logfile, " *"); // 없으면 공백찍는다.
                 }
@@ -202,7 +202,7 @@ int main(int argc, char *argv[])
     char num_port[7];
     char * p_port = num_port;
 
-    printf("+------ 캡처 프로그램 시작-------+\n");
+    printf("+------ 캡처 시작-------+\n");
 
     strcpy(p_port, argv[1]);
     printf("| 캡처하는 port:   %s\n", p_port);
