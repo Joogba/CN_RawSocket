@@ -8,6 +8,8 @@
 #include <sys/socket.h>
 #include <arpa/inet.h>
 #include <unistd.h>
+#include <stdbool.h>
+#include <signal.h>
 
 #define BUFFER_SIZE 65536
 
@@ -15,6 +17,37 @@ FILE *logfile;
 int sock_raw;
 struct sockaddr_in source, dest;
 int myflag = 0;
+
+typedef struct __dns_header { 
+    unsigned short id;       // identification number 
+    unsigned char rd :1;     // recursion desired 
+    unsigned char tc :1;     // truncated message 
+    unsigned char aa :1;     // authoritive answer 
+    unsigned char opcode :4; // purpose of message 
+    unsigned char qr :1;     // query/response flag 
+    unsigned char rcode :4;  // response code 
+    unsigned char cd :1;     // checking disabled 
+    unsigned char ad :1;     // authenticated data 
+    unsigned char z :1;      // its z! reserved 
+    unsigned char ra :1;     // recursion available 
+    unsigned short q_count;  // number of question entries
+    unsigned short ans_count; // number of answer entries 
+    unsigned short auth_count; // number of authority entries 
+    unsigned short add_count; // number of resource entries
+} Dnsheader;
+
+typedef struct __dns_question {
+    unsigned short qtype;
+    unsigned short qclass;
+} Dnsquestion;
+
+typedef struct {
+} DnsRes;
+
+typedef struct {
+
+} DnsQry;
+
 
 void ProcessPacket(unsigned char *, int, char *);
 void LogIpHeader(unsigned char *, int, char *);
@@ -27,7 +60,9 @@ void LogHttpHeader(unsigned char *, int, char *);
 void LogDnsHeader(unsigned char *, int, char *);
 
 void LogData(unsigned char *, int);
+void exit_capturing();
 
+bool check_http(unsigned char *buffer);
 
 
 
@@ -35,38 +70,94 @@ void ProcessPacket(unsigned char *buffer, int size, char *pip_so)
 {
     struct iphdr *iph = (struct iphdr*) (buffer + sizeof(struct ethhdr));
 
-    switch (iph->protocol) {
-        case 6: // TCP 프로토콜
-            if(!myflag){
-            LogTcpPacket(buffer, size, pip_so);
+    switch (iph->protocol) 
+    {
+    case 6: // TCP 프로토콜
+        if(!myflag){
+            LogHttpHeader(buffer, size, pip_so);
             printf("TCP 기록 중..\t\n");
-            }
-            printf("패킷 통과 중..");
-            break;
-        case 17: // UDP 프로토콜
-            if(myflag){
-                LogUdpPacket(buffer, size, pip_so);
-                printf("UDP 기록 중..\t\n");
-            }
-            printf("패킷 통과 중..");
-            break;
-        default:
-            printf("tcp도 udp 도아님 \n");
+        }
+        printf("패킷 통과 중..");
+        break;
+    case 17: // UDP 프로토콜
+        if(myflag){
+            LogUdpPacket(buffer, size, pip_so);
+            printf("UDP 기록 중..\t\n");
+        }
+        printf("패킷 통과 중..");
+        break;
+    default:
+        printf("tcp도 udp 도아님 \n");
     }
 }
-
 void LogHttpHeader(unsigned char *buffer, int size, char *pip_so)
 {
+    // 일단 http 데이터는 가변 길이이기 때문에 0d 0a 가 나올때까지 로깅 계속한다.
     //요청 get post 만 
-    // 1. 요청
+    // 1. 요청 
     // 2. 헤더
     //응답 
     // 1. 상태
     // 2. 헤더
-    // 3. 바디 
+    // 3. 바디
+
+    unsigned short iphdrlen;
+    unsigned short tcphdrlen;
+    int i;
+
+    struct iphdr *iph = (struct iphdr *) (buffer + sizeof(struct ethhdr));
+    iphdrlen = iph->ihl * 4;
+
+    struct tcphdr *tcph = (struct tcphdr *) (buffer + iphdrlen + sizeof(struct ethhdr));
+
+    int header_size =  sizeof(struct ethhdr) + iphdrlen + tcph->doff * 4;
+    tcphdrlen = header_size;
+
+    if(!check_http(buffer+header_size))
+    {
+        return;
+    }
+
+    if((22!=ntohs(tcph->source))&&(22!=ntohs(tcph->dest))){
+
+        fprintf(logfile, "\n\n- - - - - - - - - - - TCP Packet - - - - - - - - - - - - \n");  
+
+        LogIpHeader(buffer, size, pip_so);
+
+        LogTcpPacket(buffer, size, pip_so);
+
+        i = header_size;
+        
+
+        fprintf(logfile, "HTTP Data\n + ");
+        for(i = header_size ; i < size ; i++)
+        {
+            if(buffer[i]>=32 && buffer[i]<=128) 
+                fprintf(logfile,"%c",(unsigned char)buffer[i]);
+            else if(buffer[i] == 0x0a)
+                fprintf(logfile,"\n | ");
+            else 
+            fprintf(logfile,".");
+
+        }
+        fprintf(logfile, "\n +");
+
+        fprintf(logfile, "\nIP Header\n");
+        LogData(buffer, iphdrlen);
+
+        fprintf(logfile, "\nTCP Header\n");
+        LogData(buffer + iphdrlen, tcph->doff * 4);
+
+        fprintf(logfile, "\nData Payload\n");    
+        LogData(buffer + header_size, size - header_size);
+
+        fprintf(logfile, "\n- - - - - - - - - - - - - - - - - - - - - -");
+    }
 }
+
 void LogDNSHeader(unsigned char *buffer, int size, char *pip_so)
 {
+    //flag 8180 응답 0100 쿼리 
     //쿼리 
 
 
@@ -101,20 +192,6 @@ void LogTcpPacket(unsigned char *buffer, int size, char *pip_so)
         fprintf(logfile, " | Finish Flag          : %d\n", (unsigned int) tcph->fin);
         fprintf(logfile, " + Checksum             : %d\n", ntohs(tcph->check));
         fprintf(logfile, "\n");
-        fprintf(logfile, "                        DATA dump                         ");
-
-        fprintf(logfile, "\n");
-
-        fprintf(logfile, "\nIP Header\n");
-        LogData(buffer, iphdrlen);
-
-        fprintf(logfile, "\nTCP Header\n");
-        LogData(buffer + iphdrlen, tcph->doff * 4);
-
-        fprintf(logfile, "\nData Payload\n");    
-        LogData(buffer + header_size, size - header_size);
-
-        fprintf(logfile, "\n- - - - - - - - - - - - - - - - - - - - - -");
     }
 }
 void LogUdpPacket(unsigned char *buffer, int size, char *pip_so) {
@@ -155,14 +232,14 @@ void LogUdpPacket(unsigned char *buffer, int size, char *pip_so) {
 
 void LogIpHeader(unsigned char *buffer, int size, char * pip_so)
 {
-	unsigned short iphdrlen;
+ unsigned short iphdrlen;
 
-	struct iphdr *iph = (struct iphdr *) (buffer + sizeof(struct ethhdr));
-	iphdrlen = iph->ihl * 4;
+ struct iphdr *iph = (struct iphdr *) (buffer + sizeof(struct ethhdr));
+ iphdrlen = iph->ihl * 4;
 
-	memset(&source, 0, sizeof(source));
+ memset(&source, 0, sizeof(source));
 
-	iph->saddr = inet_addr(pip_so);
+ iph->saddr = inet_addr(pip_so);
 	source.sin_addr.s_addr = iph->saddr;//ip를 받아온다.
 
 	memset(&dest, 0, sizeof(dest));
@@ -201,13 +278,13 @@ void LogData(unsigned char *buffer, int size)
         } 
         
         if(i%16==0) fprintf(logfile,"   ");
-            fprintf(logfile," %02X",(unsigned int)buffer[i]);
-                
+        fprintf(logfile," %02X",(unsigned int)buffer[i]);
+
         if( i==size-1)  //print the last spaces
         {
             for(j=0;j<15-i%16;j++) fprintf(logfile,"   "); //extra spaces
-            
-            fprintf(logfile,"         ");
+
+                fprintf(logfile,"         ");
             
             for(j=i-i%16 ; j<=i ; j++)
             {
@@ -225,6 +302,19 @@ int main(int argc, char *argv[])
     char * pip_so = ip_source;
     char num_port[7];
     char * p_port = num_port;
+
+    // ctrl c 받으면 종료 처리
+    struct sigaction inter;
+    inter.sa_handler = exit_capturing;
+    sigemptyset(&inter.sa_mask);
+    inter.sa_flags = SA_INTERRUPT;
+
+    if(sigaction(SIGINT, &inter, NULL) < 0)
+    {
+        perror("sigaction error : ");
+        return 0;
+    }
+
 
     printf("+------ 캡처 프로그램 시작-------+\n");
 
@@ -286,4 +376,40 @@ int main(int argc, char *argv[])
     close(sock_raw);
 
     return 0;
+}
+
+void exit_capturing()
+{
+    close(sock_raw);
+    printf("\n =-=-= close Raw Socket.=-=-=\n");
+    exit(1);
+
+}
+
+bool check_http(unsigned char* p)
+{
+    if ((p[0] == 'H') && (p[1] == 'T') && (p[2] == 'T') && (p[3] == 'P')) {
+        return true;
+    }
+    //GET
+    else if ((p[0] == 'G') && (p[1] == 'E') && (p[2] == 'T')) {
+        return true;
+    }
+    //POST
+    else if ((p[0] == 'P') && (p[1] == 'O') && (p[2] == 'S') && (p[3] == 'T')) {
+        return true;
+    }
+    //PUT
+    else if ((p[0] == 'P') && (p[1] == 'U') && (p[2] == 'T')) {
+        return true;
+    }
+    //DELETE
+    else if ((p[0] == 'D') && (p[1] == 'E') && (p[2] == 'L') && (p[3] == 'E') && (p[4] == 'T') && (p[5] == 'E')) {
+        return true;
+    }
+    //HEAD
+    else if ((p[0] == 'H') && (p[1] == 'E') && (p[2] == 'A') && (p[3] == 'D')) {
+        return true;
+    }
+    return false;
 }
