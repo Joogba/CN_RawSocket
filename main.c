@@ -20,6 +20,12 @@ void ProcessPacket(unsigned char *, int, char *);
 void LogIpHeader(unsigned char *, int, char *);
 void LogTcpPacket(unsigned char *, int, char *);
 void LogUdpPacket(unsigned char *, int, char *);
+
+// data payload데이터를 파싱해서 표시
+// 
+void LogHttpHeader(unsigned char *, int, char *);
+void LogDnsHeader(unsigned char *, int, char *);
+
 void LogData(unsigned char *, int);
 
 
@@ -33,20 +39,40 @@ void ProcessPacket(unsigned char *buffer, int size, char *pip_so)
         case 6: // TCP 프로토콜
             if(!myflag){
             LogTcpPacket(buffer, size, pip_so);
-            printf("TCP 기록 중..\t");
+            printf("TCP 기록 중..\t\n");
             }
             printf("패킷 통과 중..");
             break;
         case 17: // UDP 프로토콜
             if(myflag){
                 LogUdpPacket(buffer, size, pip_so);
-                printf("UDP 기록 중..\t");
+                printf("UDP 기록 중..\t\n");
             }
             printf("패킷 통과 중..");
             break;
         default:
-            printf("패킷 통과 중..\t");
+            printf("tcp도 udp 도아님 \n");
     }
+}
+
+void LogHttpHeader(unsigned char *buffer, int size, char *pip_so)
+{
+    //요청 get post 만 
+    // 1. 요청
+    // 2. 헤더
+    //응답 
+    // 1. 상태
+    // 2. 헤더
+    // 3. 바디 
+}
+void LogDNSHeader(unsigned char *buffer, int size, char *pip_so)
+{
+    //쿼리 
+
+
+
+    //응답
+
 }
 
 void LogTcpPacket(unsigned char *buffer, int size, char *pip_so)
@@ -159,38 +185,36 @@ void LogIpHeader(unsigned char *buffer, int size, char * pip_so)
 void LogData(unsigned char *buffer, int size)
 {
     int i, j;
-    for (i = 0; i < size; i++) {  //패킷은 16비트씩 구성되있다.
-        if (i != 0 && i % 16 == 0) { // 한줄씩 찍는데 i가 16비트 배수로 떨어지면 문자니까
-
-            for (j = i - 16; j < i; j++) {
-                if (buffer[j] >= 32 && buffer[j] <= 128) {
-                    fprintf(logfile, " %c", (unsigned char) buffer[j]); // 사람 문자로 변환.
-                } else {
-                    fprintf(logfile, " *"); // 없으면 공백찍는다.
-                }
+    for(i=0 ; i < size ; i++)
+    {
+        if( i!=0 && i%16==0)   //if one line of hex printing is complete...
+        {
+            fprintf(logfile,"         ");
+            for(j=i-16 ; j<i ; j++)
+            {
+                if(buffer[j]>=32 && buffer[j]<=128)
+                    fprintf(logfile,"%c",(unsigned char)buffer[j]); //if its a number or alphabet
+                
+                else fprintf(logfile,"."); //otherwise print a dot
             }
-            fprintf(logfile,"\t\n");
-        }
-
-        if (i % 16 == 0) {
-            fprintf(logfile, " ");
-        }
-        fprintf(logfile, " %02X", (unsigned int) buffer[i]);//바이트코드 찍어줌
-
-        if (i == size - 1) { //공간채워주고
-            for(j = 0; j < 15 - i % 16; j++)  {
-                fprintf(logfile, "  "); //여백
+            fprintf(logfile,"\n");
+        } 
+        
+        if(i%16==0) fprintf(logfile,"   ");
+            fprintf(logfile," %02X",(unsigned int)buffer[i]);
+                
+        if( i==size-1)  //print the last spaces
+        {
+            for(j=0;j<15-i%16;j++) fprintf(logfile,"   "); //extra spaces
+            
+            fprintf(logfile,"         ");
+            
+            for(j=i-i%16 ; j<=i ; j++)
+            {
+                if(buffer[j]>=32 && buffer[j]<=128) fprintf(logfile,"%c",(unsigned char)buffer[j]);
+                else fprintf(logfile,".");
             }
-
-            for(j = i - i % 16; j <= i; j++) { 
-                if(buffer[j] >= 32 && buffer[j] <= 128) {
-                    fprintf(logfile, " %c", (unsigned char) buffer[j]);
-                } else {
-                    fprintf(logfile, " *");
-                }
-            }
-
-            fprintf(logfile,  "\n");
+            fprintf(logfile,"\n");
         }
     }
 }
@@ -227,22 +251,6 @@ int main(int argc, char *argv[])
             return 1;
         }
     }
-    else if (!strcmp(p_port, "ftp")) {
-        logfile = fopen("log_ftp.txt", "w");
-        printf("log_ftp.txt로 기록을 시작합니다..\n");
-        if (logfile == NULL) {
-            printf("ftp 로그파일 생성 실패.\n");
-            return 1;
-        }
-    }
-    else if (!strcmp(p_port, "telnet")) {
-        logfile = fopen("log_telnet.txt", "w");
-        printf("log_telnet.txt로 기록을 시작합니다..\n");
-        if (logfile == NULL) {
-            printf("telnet 로그파일 생성 실패.\n");
-            return 1;
-        }
-    }
     else if (!strcmp(p_port, "dns")) {
         myflag = 1;
         logfile = fopen("log_dns.txt", "w");
@@ -253,7 +261,7 @@ int main(int argc, char *argv[])
         }
     }
     else {
-        printf("이게보이면 큰일난거다. 모르는 에러다. \n");
+        printf("error \n");
         return 1;
     }
     //AF_INET, SOCK_PACKET으로하면 Layer2 까지 조작 밑에껀 Layer3까지 조작
