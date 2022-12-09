@@ -4,21 +4,32 @@
 
 typedef struct dns_header { 
     unsigned short id;       // identification number 
-    unsigned char rd :1;     // recursion desired 
-    unsigned char tc :1;     // truncated message 
-    unsigned char aa :1;     // authoritive answer 
-    unsigned char opcode :4; // purpose of message 
-    unsigned char qr :1;     // query/response flag 
-    unsigned char rcode :4;  // response code 
-    unsigned char cd :1;     // checking disabled 
-    unsigned char ad :1;     // authenticated data 
-    unsigned char z :1;      // its z! reserved 
-    unsigned char ra :1;     // recursion available 
+    unsigned char rp :1;     // recursion desired 
+    unsigned char opcode :4;     // truncated message 
+    unsigned char auth :1;     // authoritive answer 
+    unsigned char tc :1; // purpose of message 
+    unsigned char rd :1;     // query/response flag 
+    unsigned char ra :1;  // response code 
+    unsigned char z :1;     // checking disabled 
+    unsigned char aa :1;     // authenticated data 
+    unsigned char nad :1;      // its z! reserved 
+    unsigned char rc :4;     // recursion available 
     unsigned short q_count;  // number of question entries
     unsigned short ans_count; // number of answer entries 
     unsigned short auth_count; // number of authority entries 
     unsigned short add_count; // number of resource entries
 } DnsHeader;
+
+typedef struct dns_question {
+    unsigned short qtype;
+    unsigned short qclass;
+} DnsQuestion;
+
+typedef struct { // 쿼리 필드 : 이름, 타입, 클래스
+    unsigned *name;
+    DnsQuestion *ques;
+} DnsQry;
+
 
 typedef struct rdata
 {
@@ -27,14 +38,9 @@ typedef struct rdata
     unsigned short TTL;
     unsigned short data_len;
 
-} RData;
+} RData;// anser필드에 들어갈결과 데이터 
 
-
-typedef struct dns_question {
-    unsigned short qtype;
-    unsigned short qclass;
-} DnsQuestion;
-
+// answer 결과 
 typedef struct res_record {
     unsigned char * name;
     RData *resource;
@@ -42,14 +48,7 @@ typedef struct res_record {
 }ResRecord;
 
 
-typedef struct {
 
-} DnsRes;
-
-typedef struct {
-    unsigned *name;
-    DnsQuestion *ques;
-} DnsQry;
 
 
 u_char* ReadName(unsigned char* reader,unsigned char* buffer,int* count)
@@ -104,4 +103,27 @@ u_char* ReadName(unsigned char* reader,unsigned char* buffer,int* count)
     }
     name[i-1]='\0'; //remove the last dot
     return name;
+}
+
+void printDnsHeader(DnsHeader * buf, FILE* logfile)
+{
+    if(logfile ==NULL || buf == NULL)
+        return;
+    fprintf(logfile ," + Transaction ID       :%u\n",ntohs(buf->id));
+    fprintf(logfile ,"   -- flags      \n");
+    fprintf(logfile ," | Response 0=qry 1=rst :%d\n",(buf->rp));
+    fprintf(logfile ," | Opcode               :%d\n",(buf->opcode));
+    fprintf(logfile ," | Authoritative        :%d\n",(buf->auth));
+    fprintf(logfile ," | Trucated             :%d\n",(buf->tc));
+    fprintf(logfile ," | Recusion Desired     :%d\n",(buf->rd));
+    fprintf(logfile ," | Recursion available  :%d\n",(buf->ra));
+    fprintf(logfile ," | Z                    :%d\n",(buf->z));
+    fprintf(logfile ," | Answer auth          :%d\n",(buf->aa));
+    fprintf(logfile ," | Non-auth data        :%d\n",(buf->nad));
+    fprintf(logfile ," | Reply Code           :%d\n",(buf->rc));
+    fprintf(logfile ,"   ---------      \n");
+    fprintf(logfile, " | DnsQuestion          : %u\n", ntohs(buf->q_count));
+    fprintf(logfile, " | Answer               : %u\n", ntohs(buf->ans_count));
+    fprintf(logfile, " | Authoritative Server : %u\n", ntohl(buf->auth_count));
+    fprintf(logfile, " | Additional record    : %u\n", ntohl(buf->add_count));
 }

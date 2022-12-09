@@ -37,6 +37,7 @@ void exit_capturing();
 
 
 bool check_http(unsigned char *buffer);
+bool check_udp();
 
 
 
@@ -56,7 +57,7 @@ void ProcessPacket(unsigned char *buffer, int size, char *pip_so)
     case 17: // UDP 프로토콜
         if(myflag){
             LogDnsHeader(buffer, size, pip_so);
-            printf("http 기록 중..\t\n");
+            printf("dns 기록 중..\t\n");
         }
         printf("패킷 통과 중..");
         break;
@@ -139,13 +140,23 @@ void LogDnsHeader(unsigned char *buffer, int size, char *pip_so)
     unsigned short iphdrlen = iph->ihl * 4;
     struct udphdr *udph = (struct udphdr *) (buffer + iphdrlen + sizeof(struct ethhdr));
 
-    int header_size = sizeof(struct ethhdr) + iphdrlen + sizeof udph;
+    printf("s %d  , d %d\n", ntohs(udph->source), ntohs(udph->dest));
+    if(ntohs(udph->source) != 53 && ntohs(udph->dest) != 53)
+    {
+        printf("not dns\n");
+        return;
+    }
 
-    printf("debuf1\n");
-    unsigned char *qname =(unsigned char*)&buffer[sizeof(DnsHeader)];
-    DnsHeader *dns  = (DnsHeader*)(buffer+header_size);
+    int header_size = sizeof(struct ethhdr) + iphdrlen + sizeof udph; // dns 이전까지의 헤더 크기 
+
+    printf("dns read start\n");
+    unsigned char* dnsbuf = buffer + header_size;
+    DnsHeader *dns  = (DnsHeader*)(dnsbuf);
+    unsigned char *qname =(unsigned char*)&dnsbuf[sizeof(DnsHeader)];
     DnsQuestion *qinfo = NULL;
-    unsigned char* reader = &buffer[sizeof(DnsHeader) +(strlen((const char*)qname)+1)+sizeof(DnsQuestion)];
+    unsigned char* reader = &dnsbuf[sizeof(DnsHeader) +(strlen((const char*)qname)+1)+sizeof(DnsQuestion)];
+
+    printf("dns read end\n");
     int stop = 0 ;
 
     fprintf(logfile, "\n\n- - - - - - - - - - - - Dns Packet - - - - - - - - - - - - \n");
@@ -155,14 +166,13 @@ void LogDnsHeader(unsigned char *buffer, int size, char *pip_so)
 
     fprintf(logfile, "\n");
     fprintf(logfile, "Dns Header\n");
-    fprintf(logfile, " + DnsQuestion          : %u\n", ntohs(dns->q_count));
-    fprintf(logfile, " | Answer               : %u\n", ntohs(dns->ans_count));
-    fprintf(logfile, " | Authoritative Server : %u\n", ntohl(dns->auth_count));
-    fprintf(logfile, " | Additional record    : %u\n", ntohl(dns->add_count));
+    printDnsHeader(dns,logfile);
+    
 
+    printf("dns log1\n");
     for(i = 0 ; i<ntohs(dns->ans_count);i++)
     {
-        answers[i].name = ReadName(reader,buffer,&stop);
+        answers[i].name = ReadName(reader,dnsbuf,&stop);
         reader = reader + stop;
 
         answers[i].resource = (RData*)reader;
@@ -182,27 +192,27 @@ void LogDnsHeader(unsigned char *buffer, int size, char *pip_so)
         }
         else
         {
-            answers[i].rdata = ReadName(reader,buffer,&stop);
+            answers[i].rdata = ReadName(reader,dnsbuf,&stop);
             reader = reader + stop;
         }
     }
-
+    printf("dns log2\n");
      for(i=0;i<ntohs(dns->auth_count);i++)
     {
-        auth[i].name=ReadName(reader,buffer,&stop);
+        auth[i].name=ReadName(reader,dnsbuf,&stop);
         reader+=stop;
  
         auth[i].resource=(RData*)(reader);
         reader+=sizeof(RData);
  
-        auth[i].rdata=ReadName(reader,buffer,&stop);
+        auth[i].rdata=ReadName(reader,dnsbuf,&stop);
         reader+=stop;
     }
- 
+    printf("dns log3\n");
     //read additional
     for(i=0;i<ntohs(dns->add_count);i++)
     {
-        addit[i].name=ReadName(reader,buffer,&stop);
+        addit[i].name=ReadName(reader,dnsbuf,&stop);
         reader+=stop;
  
         addit[i].resource=(RData*)(reader);
@@ -219,23 +229,26 @@ void LogDnsHeader(unsigned char *buffer, int size, char *pip_so)
         }
         else
         {
-            addit[i].rdata=ReadName(reader,buffer,&stop);
+            addit[i].rdata=ReadName(reader,dnsbuf,&stop);
             reader+=stop;
         }
     }
+
  
+    printf("dns log4\n");
     //print answers
-    fprintf(logfile,"\nAnswer Records : %d \n" , ntohs(dns->ans_count) );
+    
+    fprintf(logfile, " | Answer Records       : %d \n" , ntohs(dns->ans_count) );
     for(i=0 ; i < ntohs(dns->ans_count) ; i++)
     {
-        fprintf(logfile,"Name : %s ",answers[i].name);
+        fprintf(logfile,"   Name : %s ",answers[i].name);
  
         if( ntohs(answers[i].resource->type) == 1) //IPv4 address
         {
             long *p;
             p=(long*)answers[i].rdata;
             dest.sin_addr.s_addr=(*p); //working without ntohl
-            fprintf(logfile,"has IPv4 address : %s",inet_ntoa(dest.sin_addr));
+            fprintf(logfile,"   has IPv4 address : %s",inet_ntoa(dest.sin_addr));
         }
          
         if(ntohs(answers[i].resource->type)==5) 
@@ -246,38 +259,38 @@ void LogDnsHeader(unsigned char *buffer, int size, char *pip_so)
  
         fprintf(logfile,"\n");
     }
- 
+    printf("dns log5\n");
     //print authorities
-    fprintf(logfile,"\nAuthoritive Records : %d \n" , ntohs(dns->auth_count) );
+    fprintf(logfile, " | Authoritive Records  : %d \n" , ntohs(dns->auth_count) );
     for( i=0 ; i < ntohs(dns->auth_count) ; i++)
     {
          
-        fprintf(logfile,"Name : %s ",auth[i].name);
+        fprintf(logfile,"   Name : %s ",auth[i].name);
         if(ntohs(auth[i].resource->type)==2)
         {
-            fprintf(logfile,"has nameserver : %s",auth[i].rdata);
+            fprintf(logfile,"   has nameserver : %s",auth[i].rdata);
         }
         fprintf(logfile,"\n");
     }
- 
+    printf("dns log6\n");
     //print additional resource records
-    fprintf(logfile,"\nAdditional Records : %d \n" , ntohs(dns->add_count) );
+    fprintf(logfile," | Additional Records   : %d \n" , ntohs(dns->add_count) );
     for(i=0; i < ntohs(dns->add_count) ; i++)
     {
-        fprintf(logfile,"Name : %s ",addit[i].name);
+        fprintf(logfile,"   Name : %s ",addit[i].name);
         if(ntohs(addit[i].resource->type)==1)
         {
             long *p;
             p=(long*)addit[i].rdata;
             dest.sin_addr.s_addr=(*p);
-            fprintf(logfile,"has IPv4 address : %s",inet_ntoa(dest.sin_addr));
+            fprintf(logfile,"   has IPv4 address : %s",inet_ntoa(dest.sin_addr));
         }
         fprintf(logfile,"\n");
     }
-    return;
+    
 
-
-    fprintf(logfile, "\n");
+    printf("dns log7\n");
+    fprintf(logfile, " --------- dump -------------------\n");
 
     fprintf(logfile, "\n");
     fprintf(logfile, "IP Header\n");
@@ -305,7 +318,6 @@ void LogTcpPacket(unsigned char *buffer, int size, char *pip_so)
 
     int header_size =  sizeof(struct ethhdr) + iphdrlen + tcph->doff * 4;
     if((22!=ntohs(tcph->source))&&(22!=ntohs(tcph->dest))){
-        fprintf(logfile, "\n\n- - - - - - - - - - - TCP Packet - - - - - - - - - - - - \n");  
 
         LogIpHeader(buffer, size, pip_so);
 
@@ -332,7 +344,6 @@ void LogUdpPacket(unsigned char *buffer, int size, char *pip_so) {
 
     int header_size = sizeof(struct ethhdr) + iphdrlen + sizeof udph;
 
-    fprintf(logfile, "\n\n- - - - - - - - - - - - UDP Packet - - - - - - - - - - - - \n");
 
     LogIpHeader(buffer, size, pip_so);
 
@@ -341,11 +352,6 @@ void LogUdpPacket(unsigned char *buffer, int size, char *pip_so) {
     fprintf(logfile, " | Destination Port : %d\n", ntohs(udph->dest));
     fprintf(logfile, " | UDP Length       : %d\n", ntohs(udph->len));
     fprintf(logfile, " + UDP Checksum     : %d\n", ntohs(udph->check));
-
-    
-    fprintf(logfile, "\n- - - - - - - - - - - - - - - - - - - - - - - - ");
-
-
 }
 
 void LogIpHeader(unsigned char *buffer, int size, char * pip_so)
@@ -437,7 +443,7 @@ int main(int argc, char *argv[])
     printf("+------ 캡처 프로그램 시작-------+\n");
 
     strcpy(p_port, argv[1]);
-    printf("| 캡처하는 port:   %s\n", p_port);
+    printf("| 캡처하는 프로토콜 :   %s\n", p_port);
 
     strcpy(pip_so, argv[2]);
     printf("| 캡처하는   ip:   %s\n", pip_so);
